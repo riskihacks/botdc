@@ -151,12 +151,13 @@ async def on_ready():
     # --- AUTO RECONNECT AFK (TAMBAHAN) ---
     data = load_data()
     for gid, gdata in data.items():
-        ch_id = gdata.get('afk_ch')
-        if ch_id:
-            channel = bot.get_channel(ch_id)
-            if channel:
-                try: await channel.connect()
-                except: pass
+        if isinstance(gdata, dict): # <--- WAJIB CEK BIAR NGGAK ERROR
+            ch_id = gdata.get('afk_ch')
+            if ch_id:
+                channel = bot.get_channel(ch_id)
+                if channel:
+                    try: await channel.connect()
+                    except: pass
 
 @bot.event
 async def on_member_join(m):
