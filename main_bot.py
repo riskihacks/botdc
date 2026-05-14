@@ -6,8 +6,8 @@ import json
 import os
 import re
 from static_ffmpeg import add_paths
-
 from dotenv import load_dotenv
+import yt_search
 
 # --- SETUP ---
 load_dotenv()
@@ -54,7 +54,10 @@ ytdl_format = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
-    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    'cookiefile': 'cookies.txt',
+    'cachedir': False, # <--- BIAR NGGAK NYIMPAN SAMPAH
+    'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1',
+    'extractor_args': {'youtube': {'player_client': ['web_embedded', 'ios']}}
 }
 ffmpeg_opts = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
 ytdl = yt_dlp.YoutubeDL(ytdl_format)
@@ -176,12 +179,18 @@ async def play(ctx, *, query):
     d = get_guild_data(ctx.guild.id)
     if d.get('music_ch') and ctx.channel.id != d['music_ch']: return await ctx.send(f"⚠️ Cuma di <#{d['music_ch']}>!", delete_after=5)
     if not ctx.author.voice: return await ctx.send("⚠️ Masuk Voice dulu!")
+    
     await ctx.send(f"🔍 Mencari `{query}`...", delete_after=5)
     try:
-        res = await bot.loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch10:{query}", download=False))
-        opts = [discord.SelectOption(label=e['title'][:100], value=e['webpage_url']) for e in res['entries']]
+        # --- CARA CARI BARU (YT-SEARCH) ---
+        search = yt_search.SearchPython(query)
+        res = search.videos[:10]
+        if not res: return await ctx.send("❌ Lagu nggak ketemu.")
+        
+        opts = [discord.SelectOption(label=v['title'][:100], value=v['url']) for v in res]
         await ctx.send("🎶 **Pilih lagu:**", view=MusicSearchView(opts), delete_after=30)
-    except Exception as e: await ctx.send(f"❌ Error: {e}")
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
 async def skip(ctx):

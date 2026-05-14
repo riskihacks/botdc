@@ -3,3 +3,4 @@ yt-dlp
 static-ffmpeg
 PyNaCl
 python-dotenv
+yt-search
