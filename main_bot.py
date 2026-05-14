@@ -135,12 +135,14 @@ async def setrole(ctx):
     await ctx.message.delete()
     
     class RoleButton(discord.ui.Button):
-        def __init__(self, label, role_id):
-            super().__init__(label=label, style=discord.ButtonStyle.primary, custom_id=f"role_{role_id}")
-            self.role_id = role_id
+        def __init__(self, label, role_name, style):
+            super().__init__(label=label, style=style, custom_id=f"role_{role_name}")
+            self.role_name = role_name
 
         async def callback(self, interaction):
-            role = interaction.guild.get_role(self.role_id)
+            role = discord.utils.get(interaction.guild.roles, name=self.role_name)
+            if not role: return await interaction.response.send_message(f"❌ Role **{self.role_name}** nggak ketemu di server!", ephemeral=True)
+            
             log_ch = bot.get_channel(1504426382921302017) # ROLE_LOG_CH_ID
             msg = await log_ch.send(f"⏳ **Request Role:** {interaction.user.mention} minta role **{role.name}**")
             await msg.add_reaction("✅"); await msg.add_reaction("❌")
@@ -148,20 +150,19 @@ async def setrole(ctx):
             # Simpan log ke DB
             db = get_db(); gid = str(interaction.guild.id)
             if 'role_requests' not in db[gid]: db[gid]['role_requests'] = {}
-            db[gid]['role_requests'][str(msg.id)] = {'user_id': interaction.user.id, 'role_id': self.role_id}
+            db[gid]['role_requests'][str(msg.id)] = {'user_id': interaction.user.id, 'role_id': role.id}
             save_db(db)
             
-            await interaction.response.send_message("⏳ Request kamu udah dikirim ke Admin. Sabar ya!", ephemeral=True)
+            await interaction.response.send_message(f"✅ Request **{role.name}** dikirim ke Owner!", ephemeral=True)
 
     view = discord.ui.View(timeout=None)
-    roles = [
-        ("MEMBER BMMC", 1504412211995476020),
-        ("GIRL BMMC", 1504412351233654815),
-        ("PARTNER BMMC", 1504412467365675039)
-    ]
-    for label, rid in roles: view.add_item(RoleButton(label, rid))
+    # Sesuaikan dengan screenshot kamu sayang!
+    view.add_item(RoleButton("BM GLORIX", "BM GLORIX", discord.ButtonStyle.danger))
+    view.add_item(RoleButton("BM INDOPRIDE", "BM INDOPRIDE", discord.ButtonStyle.primary))
+    view.add_item(RoleButton("BM KNRP", "BM KNRP", discord.ButtonStyle.success))
+    view.add_item(RoleButton("TAMU BM", "TAMU BM", discord.ButtonStyle.secondary))
     
-    emb = discord.Embed(title="🎭 AMBIL ROLE KAMU 🎭", description="Klik tombol untuk request role.", color=discord.Color.blue())
+    emb = discord.Embed(title="🎭 AMBIL ROLE KAMU 🎭", description="Klik tombol di bawah untuk request role.", color=discord.Color.blue())
     await ctx.send(embed=emb, view=view)
 
 bot.run(TOKEN)
