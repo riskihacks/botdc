@@ -1,200 +1,166 @@
 import discord
 from discord.ext import commands
-import yt_dlp
+import os
 import asyncio
 import json
-import os
-import re
-from static_ffmpeg import add_paths
 from dotenv import load_dotenv
-import yt_search
 
 # --- SETUP ---
 load_dotenv()
-add_paths()
 TOKEN = os.getenv('DISCORD_TOKEN')
 OWNER_ID = 1040946853321117696
-MAIN_GUILD_ID = 1503125428875825232 # Server Utama BMMC
-ROLE_LOG_CH_ID = 1504426382921302017
+MAIN_GUILD_ID = 1503125428875825232 
 DATABASE_FILE = 'bot_data.json'
-
-def load_data():
-    if os.path.exists(DATABASE_FILE):
-        try:
-            with open(DATABASE_FILE, 'r') as f: return json.load(f)
-        except: pass
-    return {}
-
-def save_data(data):
-    with open(DATABASE_FILE, 'w') as f: json.dump(data, f)
-
-def get_guild_data(guild_id):
-    data = load_data(); gid = str(guild_id)
-    if gid not in data: data[gid] = {"welcome_ch": None, "goodbye_ch": None, "music_ch": None}; save_data(data)
-    return data[gid]
-
-def set_guild_data(guild_id, key, value):
-    data = load_data(); gid = str(guild_id)
-    if gid not in data: data[gid] = {"welcome_ch": None, "goodbye_ch": None, "music_ch": None}
-    data[gid][key] = value; save_data(data)
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# --- MUSIC ---
-ytdl_format = {
-    'format': 'bestaudio/best',
-    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
-    'restrictfilenames': True,
-    'noplaylist': True,
-    'nocheckcertificate': True,
-    'ignoreerrors': False,
-    'logtostderr': False,
-    'quiet': True,
-    'no_warnings': True,
-    'default_search': 'auto',
-    'source_address': '0.0.0.0',
-    'cookiefile': 'cookies.txt',
-    'cachedir': False, # <--- BIAR NGGAK NYIMPAN SAMPAH
-    'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1',
-    'extractor_args': {'youtube': {'player_client': ['web_embedded', 'ios']}}
-}
-ffmpeg_opts = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
-ytdl = yt_dlp.YoutubeDL(ytdl_format)
+# --- DATABASE ---
+def get_db():
+    if not os.path.exists(DATABASE_FILE): return {}
+    with open(DATABASE_FILE, 'r') as f: return json.load(f)
 
-class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, volume=0.5):
-        super().__init__(source, volume); self.data = data; self.title = data.get('title')
-    @classmethod
-    async def from_url(cls, url, *, loop=None, stream=False):
-        loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
-        if 'entries' in data: data = data['entries'][0]
-        return cls(discord.FFmpegPCMAudio(data['url'] if stream else ytdl.prepare_filename(data), **ffmpeg_opts), data=data)
+def save_db(data):
+    with open(DATABASE_FILE, 'w') as f: json.dump(data, f, indent=4)
 
-queues = {}
-def check_queue(ctx):
-    gid = ctx.guild.id
-    if gid in queues and queues[gid]:
-        s = queues[gid].pop(0)
-        async def play_next():
-            try:
-                p = await YTDLSource.from_url(s['url'], loop=bot.loop, stream=True)
-                ctx.voice_client.play(p, after=lambda e: check_queue(ctx))
-                await ctx.send(f"🎶 **Now Playing:** `{p.title}`")
-            except: check_queue(ctx)
-        bot.loop.create_task(play_next())
+def get_guild_data(guild_id):
+    db = get_db(); gid = str(guild_id)
+    if gid not in db: db[gid] = {'welcome_ch': None, 'goodbye_ch': None, 'afk_ch': None}; save_db(db)
+    return db[gid]
 
-class MusicSelect(discord.ui.Select):
-    def __init__(self, options): super().__init__(placeholder="Pilih lagu kamu, Zero...", options=options)
-    async def callback(self, interaction):
-        await interaction.response.defer()
-        if interaction.guild_id not in queues: queues[interaction.guild_id] = []
-        queues[interaction.guild_id].append({'url': self.values[0]})
-        ctx = await bot.get_context(interaction.message)
-        if not interaction.guild.voice_client: await interaction.user.voice.channel.connect()
-        if not interaction.guild.voice_client.is_playing(): check_queue(ctx); await interaction.followup.send("✅ Memulai musik!", ephemeral=True)
-        else: await interaction.followup.send("➕ Masuk antrian!", ephemeral=True)
+def set_guild_data(guild_id, key, val):
+    db = get_db(); gid = str(guild_id); d = get_guild_data(guild_id)
+    db[gid][key] = val; save_db(db)
 
-class MusicSearchView(discord.ui.View):
-    def __init__(self, options): super().__init__(timeout=30); self.add_item(MusicSelect(options))
-
-# --- ROLE VIEW (EXCLUSIVE) ---
-class RoleView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
-    async def handle_request(self, interaction, role_name):
-        if interaction.guild_id != MAIN_GUILD_ID:
-            return await interaction.response.send_message("⚠️ Fitur ini eksklusif buat Server Utama BMMC!", ephemeral=True)
-            
-        await interaction.response.defer(ephemeral=True)
-        log_ch = bot.get_channel(ROLE_LOG_CH_ID)
-        if log_ch:
-            def is_old(m): return m.author.id == bot.user.id and (interaction.user.mention in m.content or (m.embeds and interaction.user.mention in str(m.embeds[0].to_dict())))
-            try: await log_ch.purge(limit=5, check=is_old)
-            except: pass
-            emb = discord.Embed(title="🎫 NEW ROLE REQUEST", color=discord.Color.orange(), description=f"Klik ⏳ untuk approve role **{role_name}**")
-            emb.add_field(name="User", value=interaction.user.mention); emb.add_field(name="Role", value=role_name)
-            msg = await log_ch.send(content=f"<@{OWNER_ID}>", embed=emb); await msg.add_reaction("⏳")
-            await interaction.followup.send(f"✅ Request **{role_name}** dikirim!", ephemeral=True)
-
-    @discord.ui.button(label="BM GLORIX", style=discord.ButtonStyle.danger, emoji="🔴", custom_id="role_glorix")
-    async def glorix(self, i, b): await self.handle_request(i, "BM GLORIX")
-    @discord.ui.button(label="BM INDOPRIDE", style=discord.ButtonStyle.primary, emoji="🔵", custom_id="role_indopride")
-    async def indopride(self, i, b): await self.handle_request(i, "BM INDOPRIDE")
-    @discord.ui.button(label="BM KNRP", style=discord.ButtonStyle.success, emoji="🟢", custom_id="role_knrp")
-    async def knrp(self, i, b): await self.handle_request(i, "BM KNRP")
-    @discord.ui.button(label="TAMU BM", style=discord.ButtonStyle.secondary, emoji="🟡", custom_id="role_tamu")
-    async def tamu(self, i, b): await self.handle_request(i, "TAMU BM")
-
-# --- AUTO APPROVE (EXCLUSIVE) ---
+# --- EVENTS ---
 @bot.event
-async def on_raw_reaction_add(payload):
-    if payload.user_id != OWNER_ID or str(payload.emoji) != "⏳" or payload.guild_id != MAIN_GUILD_ID: return
-    channel = bot.get_channel(payload.channel_id); message = await channel.fetch_message(payload.message_id)
-    if message.author.id != bot.user.id or not message.embeds: return
-    embed = message.embeds[0]
-    if "NEW ROLE REQUEST" not in str(embed.title): return
-    try:
-        uid = int(re.search(r'\d+', embed.fields[0].value).group()); rn = embed.fields[1].value
-        guild = bot.get_guild(payload.guild_id); member = guild.get_member(uid); role = discord.utils.get(guild.roles, name=rn)
-        if member and role:
-            await member.add_roles(role); await message.clear_reactions(); await message.add_reaction("✅")
-            new_emb = embed.copy(); new_emb.title = "✅ ROLE APPROVED"; new_emb.color = discord.Color.green(); new_emb.description = f"Role **{rn}** diberikan oleh Owner."
-            await message.edit(embed=new_emb); await channel.send(f"✅ **{member.name}** dapet role **{rn}**!", delete_after=5)
-    except Exception as e: print(f"Error: {e}")
+async def on_ready():
+    print(f"[+] Bot AFK Online: {bot.user}")
+    # Auto-reconnect ke channel AFK terakhir jika ada
+    db = get_db()
+    for gid, data in db.items():
+        ch_id = data.get('afk_ch')
+        if ch_id:
+            channel = bot.get_channel(ch_id)
+            if channel:
+                try: await channel.connect()
+                except: pass
 
 @bot.event
-async def on_ready(): bot.add_view(RoleView()); print(f'\n[+] Bot Online: {bot.user.name}')
-
-@bot.event
-async def on_member_join(m):
-    d = get_guild_data(m.guild.id)
+async def on_member_join(member):
+    d = get_guild_data(member.guild.id)
     if d.get('welcome_ch'):
         ch = bot.get_channel(d['welcome_ch'])
         if ch:
-            emb = discord.Embed(title="✨ WELCOME ✨", description=f"Halo {m.mention}! Selamat datang di {m.guild.name}! 🥀🔥", color=discord.Color.red())
-            emb.set_thumbnail(url=m.display_avatar.url); await ch.send(embed=emb)
+            emb = discord.Embed(title="WELCOME!", description=f"Halo {member.mention}, selamat datang di **{member.guild.name}**!", color=discord.Color.green())
+            if member.avatar: emb.set_thumbnail(url=member.avatar.url)
+            await ch.send(embed=emb)
 
-# --- COMMANDS ---
-@bot.command(aliases=['setwelcome'])
+@bot.event
+async def on_member_remove(member):
+    d = get_guild_data(member.guild.id)
+    if d.get('goodbye_ch'):
+        ch = bot.get_channel(d['goodbye_ch'])
+        if ch: await ch.send(f"👋 **{member.name}** baru aja keluar dari server.")
+
+# --- AFK VOICE FEATURES ---
+@bot.command()
+async def join(ctx):
+    """Bot masuk ke Voice Channel dan AFK selamanya"""
+    if not ctx.author.voice: return await ctx.send("⚠️ Masuk ke Voice Channel dulu sayang!")
+    
+    channel = ctx.author.voice.channel
+    if ctx.voice_client:
+        await ctx.voice_client.move_to(channel)
+    else:
+        await channel.connect()
+    
+    set_guild_data(ctx.guild.id, 'afk_ch', channel.id)
+    await ctx.send(f"✅ **BMMC AFK Mode ON!** Aku bakal jagain channel `{channel.name}` 24 jam buat kamu. 🥀🫡")
+
+@bot.command()
+async def leave(ctx):
+    """Bot keluar dari Voice Channel"""
+    if ctx.voice_client:
+        set_guild_data(ctx.guild.id, 'afk_ch', None)
+        await ctx.voice_client.disconnect()
+        await ctx.send("👋 AFK Mode OFF. Aku pamit dulu ya!")
+    else:
+        await ctx.send("⚠️ Aku lagi nggak di Voice Channel mana pun kok.")
+
+# --- PERSISTENT ROLE SYSTEM (REACTION LOGIC) ---
+@bot.event
+async def on_raw_reaction_add(payload):
+    if payload.user_id == bot.user.id: return
+    db = get_db()
+    for gid, data in db.items():
+        logs = data.get('role_requests', {})
+        if str(payload.message_id) in logs:
+            req = logs[str(payload.message_id)]
+            guild = bot.get_guild(payload.guild_id)
+            if not guild: continue
+            member = await guild.fetch_member(payload.user_id)
+            if not member.guild_permissions.administrator: return # Cuma admin yang bisa approve
+
+            user_id = req['user_id']
+            role_id = req['role_id']
+            target_member = await guild.fetch_member(user_id)
+            role = guild.get_role(role_id)
+
+            if str(payload.emoji) == "✅":
+                await target_member.add_roles(role)
+                channel = bot.get_channel(payload.channel_id)
+                msg = await channel.fetch_message(payload.message_id)
+                await msg.edit(content=f"✅ **APPROVED** by {member.mention} for <@{user_id}>", view=None)
+                await msg.clear_reactions()
+            elif str(payload.emoji) == "❌":
+                channel = bot.get_channel(payload.channel_id)
+                msg = await channel.fetch_message(payload.message_id)
+                await msg.edit(content=f"❌ **REJECTED** by {member.mention}", view=None)
+                await msg.clear_reactions()
+
+# --- SETUP COMMANDS ---
+@bot.command()
 async def setupwelcome(ctx):
     await ctx.message.delete(); set_guild_data(ctx.guild.id, 'welcome_ch', ctx.channel.id); await ctx.send("✅ Welcome set!", delete_after=3)
 
-@bot.command(aliases=['setgoodbye'])
+@bot.command()
 async def setupgoodbye(ctx):
     await ctx.message.delete(); set_guild_data(ctx.guild.id, 'goodbye_ch', ctx.channel.id); await ctx.send("✅ Goodbye set!", delete_after=3)
-
-@bot.command(aliases=['setmusic'])
-async def setupmusic(ctx):
-    await ctx.message.delete(); set_guild_data(ctx.guild.id, 'music_ch', ctx.channel.id); await ctx.send("✅ Music channel set!", delete_after=3)
 
 @bot.command()
 async def setrole(ctx):
     if ctx.guild.id != MAIN_GUILD_ID: return await ctx.send("⚠️ Fitur ini eksklusif buat Server Utama BMMC!")
-    await ctx.message.delete(); emb = discord.Embed(title="🎭 AMBIL ROLE KAMU 🎭", description="Klik tombol untuk request role.", color=discord.Color.blue())
-    await ctx.send(embed=emb, view=RoleView())
-
-@bot.command()
-async def play(ctx, *, query):
-    d = get_guild_data(ctx.guild.id)
-    if d.get('music_ch') and ctx.channel.id != d['music_ch']: return await ctx.send(f"⚠️ Cuma di <#{d['music_ch']}>!", delete_after=5)
-    if not ctx.author.voice: return await ctx.send("⚠️ Masuk Voice dulu!")
+    await ctx.message.delete()
     
-    await ctx.send(f"🔍 Mencari `{query}`...", delete_after=5)
-    try:
-        # --- CARA CARI BARU (YT-SEARCH) ---
-        search = yt_search.SearchPython(query)
-        res = search.videos[:10]
-        if not res: return await ctx.send("❌ Lagu nggak ketemu.")
-        
-        opts = [discord.SelectOption(label=v['title'][:100], value=v['url']) for v in res]
-        await ctx.send("🎶 **Pilih lagu:**", view=MusicSearchView(opts), delete_after=30)
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
+    class RoleButton(discord.ui.Button):
+        def __init__(self, label, role_id):
+            super().__init__(label=label, style=discord.ButtonStyle.primary, custom_id=f"role_{role_id}")
+            self.role_id = role_id
 
-@bot.command()
-async def skip(ctx):
-    if ctx.voice_client and ctx.voice_client.is_playing(): ctx.voice_client.stop(); await ctx.send("⏭️ Lagu di-skip!")
-    else: await ctx.send("⚠️ Ga ada lagu yang lagi muter.")
+        async def callback(self, interaction):
+            role = interaction.guild.get_role(self.role_id)
+            log_ch = bot.get_channel(1504426382921302017) # ROLE_LOG_CH_ID
+            msg = await log_ch.send(f"⏳ **Request Role:** {interaction.user.mention} minta role **{role.name}**")
+            await msg.add_reaction("✅"); await msg.add_reaction("❌")
+            
+            # Simpan log ke DB
+            db = get_db(); gid = str(interaction.guild.id)
+            if 'role_requests' not in db[gid]: db[gid]['role_requests'] = {}
+            db[gid]['role_requests'][str(msg.id)] = {'user_id': interaction.user.id, 'role_id': self.role_id}
+            save_db(db)
+            
+            await interaction.response.send_message("⏳ Request kamu udah dikirim ke Admin. Sabar ya!", ephemeral=True)
+
+    view = discord.ui.View(timeout=None)
+    roles = [
+        ("MEMBER BMMC", 1504412211995476020),
+        ("GIRL BMMC", 1504412351233654815),
+        ("PARTNER BMMC", 1504412467365675039)
+    ]
+    for label, rid in roles: view.add_item(RoleButton(label, rid))
+    
+    emb = discord.Embed(title="🎭 AMBIL ROLE KAMU 🎭", description="Klik tombol untuk request role.", color=discord.Color.blue())
+    await ctx.send(embed=emb, view=view)
 
 bot.run(TOKEN)
