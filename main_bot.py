@@ -39,12 +39,13 @@ async def on_ready():
     # Auto-reconnect ke channel AFK terakhir jika ada
     db = get_db()
     for gid, data in db.items():
-        ch_id = data.get('afk_ch')
-        if ch_id:
-            channel = bot.get_channel(ch_id)
-            if channel:
-                try: await channel.connect()
-                except: pass
+        if isinstance(data, dict): # <--- PASTIKAN DATANYA BENERAN PETA (DICT)
+            ch_id = data.get('afk_ch')
+            if ch_id:
+                channel = bot.get_channel(ch_id)
+                if channel:
+                    try: await channel.connect()
+                    except: pass
 
 @bot.event
 async def on_member_join(member):
