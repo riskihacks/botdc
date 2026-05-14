@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { 
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, 
     ButtonStyle, Events, StringSelectMenuBuilder, PermissionsBitField 
@@ -11,7 +12,7 @@ const yts = require('yt-search'); // PENCARI CADANGAN (LEBIH STABIL)
 const fs = require('fs');
 
 // --- KONFIGURASI ---
-const TOKEN = 'MTUwNDQxNjUyMDQwOTcxMDY4Nw.Gy9q-H.hWMsOm9TlTdV7SqvDpDIMIIQDwr8cJLAWgaDbs';
+const TOKEN = process.env.DISCORD_TOKEN;
 const OWNER_ID = '1040946853321117696';
 const MAIN_GUILD_ID = '1503125428875825232';
 const ROLE_LOG_CH_ID = '1504426382921302017';

@@ -7,9 +7,12 @@ import os
 import re
 from static_ffmpeg import add_paths
 
+from dotenv import load_dotenv
+
 # --- SETUP ---
+load_dotenv()
 add_paths()
-TOKEN = 'MTUwNDQxNjUyMDQwOTcxMDY4Nw.Gy9q-H.hWMsOm9TlTdV7SqvDpDIMIIQDwr8cJLAWgaDbs'
+TOKEN = os.getenv('DISCORD_TOKEN')
 OWNER_ID = 1040946853321117696
 MAIN_GUILD_ID = 1503125428875825232 # Server Utama BMMC
 ROLE_LOG_CH_ID = 1504426382921302017

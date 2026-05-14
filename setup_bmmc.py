@@ -3,7 +3,11 @@ from discord.ext import commands
 import asyncio
 
 # --- DATA DARI ZERO ---
-TOKEN = 'MTUwNDQxNjUyMDQwOTcxMDY4Nw.Gy9q-H.hWMsOm9TlTdV7SqvDpDIMIIQDwr8cJLAWgaDbs'
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = 1503125428875825232
 
 def to_bold(text):
