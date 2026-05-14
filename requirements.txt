@@ -1,2 +1,6 @@
 discord.py[voice]
+yt-dlp
+static-ffmpeg
+PyNaCl
 python-dotenv
+youtube-search

@@ -182,7 +182,7 @@ async def play(ctx, *, query):
     
     await ctx.send(f"🔍 Mencari `{query}`...", delete_after=5)
     try:
-        # --- CARA CARI BARU (YOUTUBE-SEARCH) ---
+        # --- CARA CARI (YOUTUBE-SEARCH) ---
         results = YoutubeSearch(query, max_results=10).to_dict()
         if not results: return await ctx.send("❌ Lagu nggak ketemu.")
         
