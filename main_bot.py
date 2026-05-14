@@ -144,7 +144,19 @@ async def on_raw_reaction_add(payload):
     except Exception as e: print(f"Error: {e}")
 
 @bot.event
-async def on_ready(): bot.add_view(RoleView()); print(f'\n[+] Bot Online: {bot.user.name}')
+async def on_ready():
+    bot.add_view(RoleView())
+    print(f'\n[+] Bot Online: {bot.user.name}')
+    
+    # --- AUTO RECONNECT AFK (TAMBAHAN) ---
+    data = load_data()
+    for gid, gdata in data.items():
+        ch_id = gdata.get('afk_ch')
+        if ch_id:
+            channel = bot.get_channel(ch_id)
+            if channel:
+                try: await channel.connect()
+                except: pass
 
 @bot.event
 async def on_member_join(m):
@@ -195,5 +207,25 @@ async def play(ctx, *, query):
 async def skip(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing(): ctx.voice_client.stop(); await ctx.send("⏭️ Lagu di-skip!")
     else: await ctx.send("⚠️ Ga ada lagu yang lagi muter.")
+
+# --- FITUR AFK VOICE (TAMBAHAN) ---
+@bot.command()
+async def joinvoice(ctx):
+    """Bot masuk ke Voice Channel dan AFK 24 Jam"""
+    if not ctx.author.voice: return await ctx.send("⚠️ Masuk Voice dulu sayang!")
+    channel = ctx.author.voice.channel
+    if ctx.voice_client: await ctx.voice_client.move_to(channel)
+    else: await channel.connect()
+    set_guild_data(ctx.guild.id, 'afk_ch', channel.id)
+    await ctx.send(f"✅ **AFK Mode ON!** Aku jagain channel `{channel.name}` ya. 🥀🫡")
+
+@bot.command()
+async def leavevoice(ctx):
+    """Bot keluar dari Voice Channel"""
+    if ctx.voice_client:
+        set_guild_data(ctx.guild.id, 'afk_ch', None)
+        await ctx.voice_client.disconnect()
+        await ctx.send("👋 AFK Mode OFF. Aku pamit dulu!")
+    else: await ctx.send("⚠️ Aku lagi nggak di Voice mana pun.")
 
 bot.run(TOKEN)
